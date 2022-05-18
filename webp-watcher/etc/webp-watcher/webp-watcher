@@ -1,0 +1,97 @@
+#!/bin/bash
+
+# kill old watchers
+# NOW DEALT WITH BY INIT SCRIPT KILLED PIDs in /var/run/webp-watcher.pid
+#if [ $(ps -ef | grep -v grep | grep inotifywait | wc -l) -gt 0 ]; then
+#    killall inotifywait
+#fi
+
+# kill any finds in case we are restarting the script and they are still ongoing
+# NOW DEALT WITH BY INIT SCRIPT KILLED PIDs in /var/run/webp-watcher.pid
+#if [ $(ps -ef | grep -v grep | grep find | wc -l) -gt 0 ]; then
+#    killall find
+#fi
+
+while IFS="" read -r folder || [ -n "$folder" ]
+do
+#Set the inotify watchers
+inotifywait -m "$folder" -e close_write -e moved_to |
+    while read path action file; do
+
+        if [[ $file = *.jpg ]] || [[ $file = *.jpeg ]]
+        then
+             mimetype=`identify -format %[colorspace] "$path$file"`
+                 if [ "$mimetype" == "CMYK" ]; then
+                     convert "$path$file" -colorspace sRGB "$path$file"
+                 fi
+             cwebp -quiet -q 80 "$path$file" -o "$path$file.webp";
+        fi
+
+        if [[ $file = *.png ]]
+        then
+             cwebp -quiet -q 90 "$path$file" -o "$path$file.webp";
+        fi
+
+	#set file ownership same as containing folder
+        if [ -f $path$file ]; then
+             USER=$(stat -c '%U' $path)
+             GROUP=$(stat -c '%G' $path)
+             chown "$USER":"$GROUP" "$path$file"
+        fi
+
+    done &
+echo $!>>/var/run/webp-watcher.pid
+
+done < /etc/webp-watcher.conf
+#Finda Code now below
+#/etc/webp-watcher/finda
+
+#Reset the file - so it doesn't continually get larger
+rm /etc/webp-watcher/output.txt
+
+while IFS="" read -r folder || [ -n "$folder" ]
+do
+# find any files not processed, save to file
+# In a second loop so as to not delay setting watchers
+# Saving to file and processing is 100s of times faster than exec processing in line
+# TODO: Possibly test speed running straight in memory, creating an array
+find $folder -type f -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" >> /etc/webp-watcher/output.txt
+
+done < /etc/webp-watcher.conf
+
+
+#Processim code now below
+#/etc/webp-watcher/processim &
+
+while IFS="" read -r filepath || [ -n "$filepath" ]
+do
+# find any files not processed, RGB convert and WEBP convert
+# In a second loop so as to not delay setting watchers
+webp_path="$filepath.webp";
+if [ ! -f "$webp_path" ]; then
+    echo $filepath
+    FILESIZE=$(stat -c%s "$filepath")
+    if [ $FILESIZE -gt 0 ]; then
+    mimetype=`identify -format %[colorspace] "$filepath"`
+    if [ "$mimetype" == "CMYK" ]; then
+        convert "$filepath" -colorspace sRGB "$filepath"
+        #inotify will create a webp version now
+    else
+        if [[ $filepath = *.jpg ]] || [[ $filepath = *.jpeg ]]
+        then
+            cwebp -quiet -q 80 "$filepath" -o "$webp_path";
+        fi
+        if [[ $filepath = *.png ]]
+        then
+            cwebp -quiet -q 90 "$filepath" -o "$webp_path";
+        fi
+    fi;
+
+    else
+        echo "SKIPPED";
+	#Useful to find empty files that need re-processing by Wordpress
+	#rm /etc/webp-watcher/zero_byte.txt
+        #echo "$filepath" >> /etc/webp-watcher/zero_byte.txt
+    fi;
+fi;
+done < output.txt
