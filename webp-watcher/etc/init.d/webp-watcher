@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# chkconfig: 2345 90 60
+
+case "$1" in
+start)
+   if [ -e /var/run/webp-watcher.pid ]; then
+      echo webp-watcher is already running
+      exit 1
+   else
+      nohup /etc/webp-watcher/webp-watcher > /dev/null 2>&1 &
+      echo $!>/var/run/webp-watcher.pid
+
+   fi
+   ;;
+stop)
+   if [ -e /var/run/webp-watcher.pid ]; then
+      while IFS="" read -r pid || [ -n "$pid" ]
+      do
+         pkill -P $pid
+      done < /var/run/webp-watcher.pid
+      rm /var/run/webp-watcher.pid
+      if [ $(ps -ef | grep -v grep | grep inotifywait | wc -l) -gt 0 ]; then
+         killall inotifywait
+      fi
+
+      if [ $(ps -ef | grep -v grep | grep find | wc -l) -gt 0 ]; then
+         killall find
+      fi
+   else
+      echo webp-watcher is not running
+   fi
+   ;;
+restart)
+   if [ -e /var/run/webp-watcher.pid ]; then
+      $0 stop
+      $0 start
+   else
+      $0 start
+   fi
+   ;;
+status)
+   if [ -e /var/run/webp-watcher.pid ]; then
+      echo webp-watcher is running, pid=`cat /var/run/webp-watcher.pid`
+   else
+      echo webp-watcher is not running
+      exit 1
+   fi
+   ;;
+*)
+   echo "Usage: $0 {start|stop|status|restart}"
+esac
+
+exit 0
